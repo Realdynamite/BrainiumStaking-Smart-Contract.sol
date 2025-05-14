@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract BrainiumStakings {
+    address public centralWallet; // Central wallet to fund interest
+    uint256 public constant MINIMUM_STAKE_AMOUNT = 0.0001 ether; // 0.0001 ETH
+    uint256 public constant INTEREST_RATE = 10; // 10% interest
+
+    struct Stake {
+        uint256 amount;
+        uint256 timestamp;
+    }
+
+    mapping(address => Stake[]) public stakes; // Mapping multiple stakes for each user
+
+    event Staked(address indexed user, uint256 amount, uint256 stakeIndex);
+    event Unstaked(address indexed user, uint256 amount, uint256 reward, bool earlyWithdrawal);
+
+    constructor(address _centralWallet) {
+        centralWallet = _centralWallet;
+    }
+
+    // Returns the name of the contract dynamically
+    function name() public pure returns (string memory) {
+        return type(BrainiumStakings).name;
+    }
+
+    // Stake function is now payable to accept multiple stakes
+    function stake() external payable {
+        require(msg.value >= MINIMUM_STAKE_AMOUNT, "Stake amount is too low");
+
+        // Tracking of user's stake
+        stakes[msg.sender].push(Stake({
+            amount: msg.value,
+            timestamp: block.timestamp
+        }));
+
+        uint256 stakeIndex = stakes[msg.sender].length - 1;
+
+        emit Staked(msg.sender, msg.value, stakeIndex);
+    }
+
+    function unstake(uint256 stakeIndex) external {
+        require(stakeIndex < stakes[msg.sender].length, "Invalid stake index");
+
+        Stake storage userStake = stakes[msg.sender][stakeIndex];
+        require(userStake.amount > 0, "No active stake found");
+
+        uint256 stakedAmount = userStake.amount;
+        uint256 stakingTime = block.timestamp - userStake.timestamp;
+
+        uint256 payout;
+        bool earlyWithdrawal = stakingTime < 3 minutes;
+
+        if (earlyWithdrawal) {
+            // Penalize the user with a 3% deduction
+            uint256 penalty = (stakedAmount * 3) / 100;
+            payout = stakedAmount - penalty;
+        } else {
+            // Reward the user with a 10% profit
+            uint256 profit = (stakedAmount * INTEREST_RATE) / 100;
+            payout = stakedAmount + profit;
+        }
+
+        // Ensure the contract has enough funds to pay
+        require(address(this).balance >= payout, "Insufficient contract balance");
+
+        // Mark the stake as withdrawn by setting amount to 0
+        userStake.amount = 0;
+
+        // Send the payout to the user
+        (bool success, ) = msg.sender.call{value: payout}("");
+        require(success, "Transfer failed");
+
+        emit Unstaked(msg.sender, stakedAmount, payout, earlyWithdrawal);
+    }
+
+    function getStake(uint256 stakeIndex) external view returns (uint256 amount, uint256 timestamp) {
+        require(stakeIndex < stakes[msg.sender].length, "Invalid stake index");
+        Stake memory userStake = stakes[msg.sender][stakeIndex];
+        return (userStake.amount, userStake.timestamp);
+    }
+
+    function getAllStakes() external view returns (Stake[] memory) {
+        return stakes[msg.sender];
+    }
+
+    function getContractBalance() external view returns (uint256) {
+        return address(this).balance;
+    }
+
+    function calculateReward(uint256 _stakedAmount) public pure returns (uint256) {
+        return (_stakedAmount * INTEREST_RATE) / 100;
+    }
+
+    // Central wallet can deposit Ether for rewards
+    function fundRewardPool() external payable {
+        require(msg.sender == centralWallet, "Only central wallet can fund rewards");
+        require(msg.value > 0, "Must send ETH to fund the pool");
+    }
+
+    // Fallback function to accept Ether
+    receive() external payable {}
+}
