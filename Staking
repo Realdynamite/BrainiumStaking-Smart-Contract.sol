@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract AutoPayoutStaking {
+    address public centralWallet; // Central wallet to fund interest
+    uint256 public constant MINIMUM_STAKE_AMOUNT = 0.0001 ether; // 0.0001 ETH
+    uint256 public constant INTEREST_RATE = 10; // 10% interest
+
+    mapping(address => uint256) public stakes;
+
+    event Staked(address indexed user, uint256 amount);
+    event Unstaked(address indexed user, uint256 amount, uint256 reward);
+
+    constructor(address _centralWallet) {
+        centralWallet = _centralWallet;
+    }
+
+    // Stake function is now payable to accept Ether
+    function stake() external payable {
+        require(msg.value >= MINIMUM_STAKE_AMOUNT, "Stake amount is too low");
+
+        // Track user's stake
+        stakes[msg.sender] += msg.value;
+
+        emit Staked(msg.sender, msg.value);
+    }
+
+    function unstake() external {
+        uint256 stakedAmount = stakes[msg.sender];
+        require(stakedAmount > 0, "You have no funds staked");
+
+        // Calculate the reward
+        uint256 reward = calculateReward(stakedAmount);
+        uint256 totalPayout = stakedAmount + reward;
+
+        // Ensure the central wallet has enough funds to pay the reward
+        require(address(this).balance >= totalPayout, "Insufficient contract balance");
+
+        // Reset user's stake
+        stakes[msg.sender] = 0;
+
+        // Transfer the staked amount and reward back to the user
+        payable(msg.sender).transfer(totalPayout);
+
+        emit Unstaked(msg.sender, stakedAmount, reward);
+    }
+
+    function calculateReward(uint256 _stakedAmount) public pure returns (uint256) {
+        return (_stakedAmount * INTEREST_RATE) / 100;
+    }
+
+    // Central wallet can deposit Ether for rewards
+    function fundRewardPool() external payable {
+        require(msg.sender == centralWallet, "Only central wallet can fund rewards");
+        require(msg.value > 0, "Must send ETH to fund the pool");
+    }
+
+    // Fallback function to accept Ether
+    receive() external payable {}
+}
